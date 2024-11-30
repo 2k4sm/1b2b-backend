@@ -24,14 +24,15 @@ jobs:
 
     - name: Deploy to EC2
       if: (github.event_name == 'push' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-      uses: easingthemes/ssh-deploy@main
+      uses: appleboy/scp-action@master
       with:
-        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        ARGS: "-rlgoDzvc -i --delete"
-        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-        REMOTE_USER: ${{ secrets.REMOTE_USER }}
-        TARGET: ${{ secrets.REMOTE_TARGET }}
-        EXCLUDE: "/node_modules/, /uploads/, *.pem, *.env"
+        host: ${{ secrets.REMOTE_HOST }}
+        username: ${{ secrets.REMOTE_USER }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        source: ".,!node_modules/,!uploads/,!*.pem,!*.env"
+        target: ${{ secrets.REMOTE_TARGET }}
+        rm: true
+        strip_components: 1
 
     - name: Restart Node.js application
       if: (github.event_name == 'push' || github.event_name == 'pull_request') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
