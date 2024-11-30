@@ -110,7 +110,6 @@ function validateFiles(files) {
     const maxSize = 8 * 1024 * 1024;
 
     for (const file of Object.values(files)) {
-        console.log(file)
         if (!allowedTypes.includes(file.type)) {
             return {
                 status: "error",
