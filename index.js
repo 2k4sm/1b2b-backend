@@ -88,7 +88,25 @@ app.post('/analyse', async (req, res) => {
 });
 
 function validateFiles(files) {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg' ,'image/psd', 'application/x-photoshop'];
+    const allowedTypes = [
+    'image/jpeg',               // JPEG, JPG
+    'image/jpg',
+    'image/png',                // PNG
+    // 'image/gif',                // GIF
+    'image/webp',               // WebP
+    // 'image/tiff',               // TIFF
+    // 'image/bmp',                // BMP
+    'image/x-icon',             // ICO
+    'image/svg+xml',            // SVG
+
+    'image/vnd.adobe.photoshop',    // Standard PSD
+    'application/x-photoshop',      // Alternative PSD
+    'image/psd',                    // Alternative PSD
+    'application/photoshop',        // Alternative PSD
+    'application/psd',              // Alternative PSD
+    'image/psb',                    // PSB (Large Document Format)
+    'application/x-psb'             // Alternative PSB
+];
     const maxSize = 8 * 1024 * 1024;
 
     for (const file of Object.values(files)) {
