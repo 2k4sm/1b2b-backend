@@ -4,7 +4,9 @@ import formidableMiddleware from 'express-formidable';
 import { extract } from './src/extraction.js';
 import * as fs from "fs";
 import * as path from "path";
-
+import * as dotenv from "dotenv";
+import { time } from 'console';
+dotenv.config();
 const app = express()
 
 app.use(cors())
@@ -16,12 +18,22 @@ app.use(formidableMiddleware({
     keepExtensions : true,
 }))
 
+const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
 app.get('/', (req, res) => {
-  res.send('Hello World!')
+  res.send({
+    message: "muah😘...",
+    time : new Date()
+  })
 })
 
 app.post('/analyse', async (req, res) => {
-    const extracts = extract(req.files)
+
+    const extracts = await extract(req.files)
 
     cleanUp(req.files)
     res.send(extracts)
