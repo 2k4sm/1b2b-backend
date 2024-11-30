@@ -4,6 +4,7 @@ import * as path from "path";
 import { AdAnalysisService } from "./rekognition.js";
 import mime from 'mime-types';
 import sharp from "sharp";
+import * as Color from "color";
 
 
 export async function extract(multipartFiles) {
@@ -31,86 +32,296 @@ export async function extract(multipartFiles) {
 }
 
 function extractPSD(files) {
+    if (!files || files.length === 0) {
+        return;
+    }
+
     let processedFiles = [];
     
     for (const file of files) {
-        const psd_file = fs.readFileSync(file);
-        const parsedPsd = Psd.parse(psd_file.buffer);
-        const extractedData = processFile(parsedPsd);
-        processedFiles.push(extractedData);
+        try {
+            const psd_file = fs.readFileSync(file);
+            const parsedPsd = Psd.parse(psd_file.buffer);
+            const extractedData = processFile(parsedPsd);
+            if (extractedData) {
+                processedFiles.push(extractedData);
+            }
+        } catch (error) {
+            console.error(`Error processing file: ${error.message}`);
+        }
     }
 
-    return processedFiles;
+    if (processedFiles.length === 0) {
+        return;
+    }
+
+    return [
+        {
+            status: "success",
+            processed_count: processedFiles.length,
+            successful_count: processedFiles.filter(f => !f.file_info.error).length,
+            results: processedFiles
+        }
+    ];
 }
 
 function processFile(psdFile) {
-    const output = {
-        text: {
-            primary_text: "",
-            headline: "",
-            description: "",
-            call_to_action: ""
-        },
-        image_description: {
-            type: "static_image",
-            dimensions: {
-                width: psdFile.width,
-                height: psdFile.height,
-                aspect_ratio: `${(psdFile.width / psdFile.height).toFixed(2)}:1`
-            },
-            content: {
-                main_subject: "",
-                background: "",
-                text_overlay: {
-                    positions: []
-                },
-                brand_elements: {}
-            },
-            technical_specs: {
-                color_space: "sRGB",
-                resolution: `${psdFile.resolution?.horizontal || 72}dpi`
-            }
-        },
-        colors: {
-            primary: [],
-            secondary: [],
-            gradient: []
-        }
+    const details = {
+        layers: [],
+        colors: new Set(),
+        textElements: []
     };
 
-    traverseNode(psdFile, output);
-    return cleanOutput(output);
+    traverseLayers(psdFile, details);
+
+    return formatOutput(psdFile, details);
 }
 
-function traverseNode(node, output) {
+function traverseLayers(node, details, path = '') {
     if (node.type === "Layer") {
-        processLayer(node, output);
-    }
+        const layerInfo = extractLayerInfo(node, path);
+        details.layers.push(layerInfo);
 
-    node.children?.forEach((child) => traverseNode(child, output));
-}
+        if (layerInfo.color) {
+            details.colors.add(layerInfo.color);
+        }
 
-function cleanOutput(obj) {
-    const cleaned = {};
-    
-    for (const [key, value] of Object.entries(obj)) {
-        if (value && typeof value === 'object') {
-            if (Array.isArray(value)) {
-                if (value.length > 0) {
-                    cleaned[key] = value;
+        if (layerInfo.text) {
+            details.textElements.push({
+                layer_name: layerInfo.name,
+                path: layerInfo.path,
+                text: layerInfo.text.value,
+                position: layerInfo.bounds,
+                styles: {
+                    font: layerInfo.text.font,
+                    fontSize: layerInfo.text.fontSize,
+                    color: layerInfo.text.color,
+                    alignment: layerInfo.text.alignment,
+                    ...layerInfo.text.styles
                 }
-            } else {
-                const cleanedChild = cleanOutput(value);
-                if (Object.keys(cleanedChild).length > 0) {
-                    cleaned[key] = cleanedChild;
-                }
-            }
-        } else if (value !== "" && value !== null && value !== undefined) {
-            cleaned[key] = value;
+            });
         }
     }
-    
-    return cleaned;
+
+    node.children?.forEach((child, index) => {
+        const newPath = path ? `${path}/${child.name}` : child.name;
+        traverseLayers(child, details, newPath);
+    });
+}
+
+function extractLayerInfo(layer, path) {
+    const layerInfo = {
+        name: layer.name || "",
+        path: path,
+        type: determineLayerType(layer),
+        bounds: {
+            top: layer.top || 0,
+            right: layer.right || 0,
+            bottom: layer.bottom || 0,
+            left: layer.left || 0
+        },
+        blendMode: layer.blendMode || 'normal',
+        opacity: layer.opacity || 255,
+        visible: layer.visible ?? true
+    };
+
+    // Extract text information
+    if (layer.text) {
+        layerInfo.text = extractTextInfo(layer.text);
+    }
+
+    // Extract color information
+    layerInfo.color = extractLayerColor(layer);
+
+    return layerInfo;
+}
+
+function determineLayerType(layer) {
+    if (layer.text) return 'text';
+    if (layer.smartObject) return 'smartObject';
+    if (layer.adjustment) return 'adjustment';
+    if (layer.shape) return 'shape';
+    if (layer.image) return 'image';
+    return 'layer';
+}
+
+function extractTextInfo(textData) {
+    return {
+        value: textData.value || "",
+        font: textData.font || "",
+        fontSize: textData.fontSize || 0,
+        color: extractColor(textData.color),
+        alignment: textData.alignment || "left",
+        styles: {
+            bold: textData.bold || false,
+            italic: textData.italic || false,
+            underline: textData.underline || false
+        }
+    };
+}
+
+function extractLayerColor(layer) {
+    // Try fill color
+    if (layer.fill?.color) {
+        return extractColor(layer.fill.color);
+    }
+
+    // Try solid color
+    if (layer.solidColor) {
+        return extractColor(layer.solidColor);
+    }
+
+    // Try channels
+    if (layer.channels && layer.channels.length >= 3) {
+        const [r, g, b] = layer.channels;
+        if (r?.data?.[0] !== undefined && 
+            g?.data?.[0] !== undefined && 
+            b?.data?.[0] !== undefined) {
+            return rgbToHex(r.data[0], g.data[0], b.data[0]);
+        }
+    }
+
+    // Try additional layer properties
+    if (layer.additionalLayerProperties?.SoCo?.data?.Clr) {
+        const color = layer.additionalLayerProperties.SoCo.data.Clr;
+        if (color.Rd !== undefined && color.Grn !== undefined && color.Bl !== undefined) {
+            return rgbToHex(color.Rd * 255, color.Grn * 255, color.Bl * 255);
+        }
+    }
+
+    return null;
+}
+
+function extractColor(color) {
+    if (!color) return null;
+
+    // Handle RGB
+    if (color.r !== undefined && color.g !== undefined && color.b !== undefined) {
+        return rgbToHex(color.r, color.g, color.b);
+    }
+
+    // Handle CMYK
+    if (color.c !== undefined && color.m !== undefined && 
+        color.y !== undefined && color.k !== undefined) {
+        const r = 255 * (1 - color.c) * (1 - color.k);
+        const g = 255 * (1 - color.m) * (1 - color.k);
+        const b = 255 * (1 - color.y) * (1 - color.k);
+        return rgbToHex(r, g, b);
+    }
+
+    return null;
+}
+
+function formatOutput(psdFile, details) {
+    const colors = Array.from(details.colors);
+
+    return {
+        file_info: {
+            name: psdFile.name || "ROOT",
+            size: psdFile.fileSize || 0,
+            type: "image/psd",
+            extension: ".psd",
+            dimensions: {
+                width: psdFile.width,
+                height: psdFile.height
+            }
+        },
+        analysis: {
+            status: "success",
+            image_specs: {
+                dimensions: {
+                    width: psdFile.width,
+                    height: psdFile.height
+                },
+                format: "psd",
+                aspect_ratio: parseFloat((psdFile.width / psdFile.height).toFixed(2)),
+                size_category: getSizeCategory(psdFile.width, psdFile.height)
+            },
+            content: {
+                visual_elements: {
+                    products: [],
+                    people: [],
+                    background_elements: [],
+                    branding: []
+                },
+                text_content: {
+                    headline: details.textElements
+                        .filter(t => t.layer_name.toLowerCase().includes('headline'))
+                        .map(t => ({
+                            text: t.text,
+                            position: t.position,
+                            font_size: t.styles.fontSize
+                        })),
+                    body_text: details.textElements
+                        .filter(t => !t.layer_name.toLowerCase().match(/headline|cta|disclaimer/))
+                        .map(t => ({
+                            text: t.text,
+                            position: t.position,
+                            font_size: t.styles.fontSize
+                        })),
+                    cta: details.textElements
+                        .filter(t => t.layer_name.toLowerCase().includes('cta'))
+                        .map(t => ({
+                            text: t.text,
+                            position: t.position,
+                            font_size: t.styles.fontSize
+                        })),
+                    disclaimers: details.textElements
+                        .filter(t => t.layer_name.toLowerCase().includes('disclaimer'))
+                        .map(t => ({
+                            text: t.text,
+                            position: t.position,
+                            font_size: t.styles.fontSize
+                        }))
+                },
+                color_scheme: {
+                    dominant: colors[0] || null,
+                    accent: colors.slice(1, 3),
+                    background: details.layers.find(l => 
+                        l.name.toLowerCase().includes('background'))?.color || null,
+                    contrast_ratio: null
+                }
+            }
+        },
+        text_extraction: {
+            primary_text: details.textElements
+                .find(t => !t.layer_name.toLowerCase().match(/headline|cta|disclaimer/))?.text || "",
+            headline: details.textElements
+                .find(t => t.layer_name.toLowerCase().includes('headline'))?.text || "",
+            description: details.textElements
+                .find(t => t.layer_name.toLowerCase().includes('description'))?.text || "",
+            call_to_action: details.textElements
+                .find(t => t.layer_name.toLowerCase().includes('cta'))?.text || "",
+            content_text: {
+                all_text: details.textElements.map(t => t.text).join(' ').trim(),
+                layer_texts: details.textElements.map(t => ({
+                    layer: t.layer_name,
+                    path: t.path,
+                    text: t.text,
+                    position: t.position,
+                    styles: t.styles
+                }))
+            }
+        },
+        layers: details.layers.map(layer => ({
+            name: layer.name,
+            path: layer.path,
+            type: layer.type,
+            bounds: layer.bounds,
+            text: layer.text,
+            color: layer.color,
+            blendMode: layer.blendMode,
+            opacity: layer.opacity,
+            visible: layer.visible
+        }))
+    };
+}
+
+function getSizeCategory(width, height) {
+    const area = width * height;
+    if (area <= 300000) return "small";
+    if (area <= 1000000) return "medium";
+    return "large";
 }
 
 function rgbToHex(r, g, b) {
@@ -122,119 +333,7 @@ function rgbToHex(r, g, b) {
     g = Math.min(255, Math.max(0, Math.round(Number(g))));
     b = Math.min(255, Math.max(0, Math.round(Number(b))));
     
-    const toHex = (n) => {
-        const hex = n.toString(16);
-        return hex.length === 1 ? '0' + hex : hex;
-    };
-    
-    return '#' + toHex(r) + toHex(g) + toHex(b);
-}
-
-function processLayer(layer, output) {
-    const props = layer.layerFrame?.layerProperties;
-    if (!props) return;
-
-    if (props.name) {
-        if (props.name.includes('<FR>')) {
-            output.text.primary_text = props.name.replace('<FR>', '').trim();
-        } else if (props.name.toLowerCase().includes('headline')) {
-            output.text.headline = props.name;
-        } else if (props.name.toLowerCase().includes('cta')) {
-            output.text.call_to_action = props.name;
-        } else if (props.name.toLowerCase().includes('description')) {
-            output.text.description = props.name;
-        }
-    }
-
-    if (props.top !== undefined && props.left !== undefined) {
-        output.image_description.content.text_overlay.positions.push({
-            top: props.top,
-            left: props.left,
-            bottom: props.bottom,
-            right: props.right,
-            name: props.name
-        });
-    }
-
-    const colorInfo = {
-        color: null,
-        opacity: props.opacity !== undefined ? props.opacity / 255 : 1,
-        blendMode: props.blendMode || 'normal'
-    };
-
-    if (layer.layerFrame?.additionalLayerProperties) {
-        const layerProps = layer.layerFrame.additionalLayerProperties;
-        
-        if (layerProps.SoCo?.data?.Clr) {
-            const solidColor = layerProps.SoCo.data.Clr;
-            if (solidColor.Rd !== undefined && solidColor.Grn !== undefined && solidColor.Bl !== undefined) {
-                colorInfo.color = rgbToHex(
-                    solidColor.Rd * 255,
-                    solidColor.Grn * 255,
-                    solidColor.Bl * 255
-                );
-            }
-        }
-
-        if (layerProps.GdFl?.data?.Clrs) {
-            const gradientColors = layerProps.GdFl.data.Clrs
-                .map(c => {
-                    if (c?.Clr?.Rd !== undefined && c?.Clr?.Grn !== undefined && c?.Clr?.Bl !== undefined) {
-                        return rgbToHex(c.Clr.Rd * 255, c.Clr.Grn * 255, c.Clr.Bl * 255);
-                    }
-                    return null;
-                })
-                .filter(color => color !== null);
-
-            if (gradientColors.length > 0) {
-                output.colors.gradient.push({
-                    type: 'gradient',
-                    colors: gradientColors
-                });
-            }
-        }
-    }
-
-    if (layer.layerFrame?.channels) {
-        const channels = Array.from(layer.layerFrame.channels.values());
-        if (channels.length >= 3) {
-            const [red, green, blue] = channels;
-            if (red?.data?.[0] !== undefined && 
-                green?.data?.[0] !== undefined && 
-                blue?.data?.[0] !== undefined) {
-                colorInfo.color = rgbToHex(
-                    red.data[0],
-                    green.data[0],
-                    blue.data[0]
-                );
-            }
-        }
-    }
-
-    if (colorInfo.color) {
-        const colorEntry = {
-            color: colorInfo.color,
-            opacity: colorInfo.opacity,
-            source: props.name || 'unnamed_layer'
-        };
-
-        if (props.name?.toLowerCase().includes('bg') || 
-            (colorInfo.blendMode === 'normal' && colorInfo.opacity === 1)) {
-            output.colors.primary.push(colorEntry);
-        } else {
-            output.colors.secondary.push({
-                ...colorEntry,
-                blendMode: colorInfo.blendMode
-            });
-        }
-    }
-
-    if (props.opacity !== undefined) {
-        const opacity = (props.opacity / 255 * 100).toFixed(0);
-        if (opacity < 100) {
-            output.image_description.content.text_overlay.opacity = `${opacity}%`;
-        }
-    }
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 async function extractImage(filePaths) {
