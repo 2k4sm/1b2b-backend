@@ -1,7 +1,7 @@
 import express, { json } from 'express'
 import cors from "cors"
 import formidableMiddleware from 'express-formidable';
-import { extract } from './src/extraction.js';
+import { extract } from './src/services/extraction.js';
 import * as fs from "fs";
 import * as path from "path";
 import * as dotenv from "dotenv";

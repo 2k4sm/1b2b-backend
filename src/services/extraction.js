@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import PSD from "psd";
 import * as path from "path";
-import { AdAnalysisService } from "./rekognition.js";
-import { extractTreeData, getSizeCategory } from "./psdParser.js";
-import { processImageFile, createResponse } from "./imgUtils.js";
+import { AdAnalysisService } from "../utils/rekognition.js";
+import { extractTreeData, getSizeCategory } from "../utils/psdParser.js";
+import { processImageFile, createResponse } from "../utils/imgUtils.js";
 
 export async function extract(multipartFiles) {
     let imageFiles = []
