@@ -90,6 +90,7 @@ async function extractPSD(files) {
     }
 
     return {
+        type : "psd",
         status: "success",
         processed_count: processedFiles.length,
         successful_count: processedFiles.filter(f => !f.file_info.error).length,

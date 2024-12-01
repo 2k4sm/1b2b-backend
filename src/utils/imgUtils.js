@@ -103,6 +103,7 @@ function normalizeTextFields(textObject) {
 
 export function createResponse(processed, successful, results) {
     return {
+        type : "image",
         status: "success",
         processed_count: processed,
         successful_count: successful,
