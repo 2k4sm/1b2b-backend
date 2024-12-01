@@ -6,24 +6,54 @@ import { extractTreeData, getSizeCategory } from "../utils/psdParser.js";
 import { processImageFile, createResponse } from "../utils/imgUtils.js";
 
 export async function extract(multipartFiles) {
-    let imageFiles = []
-    let psdFiles = []
+    if (!multipartFiles) {
+        return [];
+    }
+
+    let imageFiles = [];
+    let psdFiles = [];
     const files = Object.values(multipartFiles);
 
     for (const file of files) {
         const filePath = file.filepath || file.path;
-        const ext = path.extname(filePath);
-        if (ext === ".psd") {
+        if (!filePath) {
+            console.warn('File missing filepath:', file);
+            continue;
+        }
+        
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.psd') {
             psdFiles.push(filePath);
         } else {
             imageFiles.push(filePath);
         }
     }
 
-    const imageResults = await extractImage(imageFiles);
-    const psdResults = await extractPSD(psdFiles);
+    let res = [];
 
-    return [imageResults, psdResults];
+    if (imageFiles.length > 0) {
+        try {
+            const imageResults = await extractImage(imageFiles);
+            if (imageResults) {
+                res.push(imageResults);
+            }
+        } catch (error) {
+            console.error('Error processing image files:', error);
+        }
+    }
+
+    if (psdFiles.length > 0) {
+        try {
+            const psdResults = await extractPSD(psdFiles);
+            if (psdResults) {
+                res.push(psdResults);
+            }
+        } catch (error) {
+            console.error('Error processing PSD files:', error);
+        }
+    }
+
+    return res;
 }
 
 async function extractPSD(files) {

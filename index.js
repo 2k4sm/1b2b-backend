@@ -42,6 +42,17 @@ app.post('/analyse', async (req, res) => {
             });
         }
 
+        if (!req.files || Object.keys(req.files).length > 1) {
+            return res.status(400).json({
+                status: "error",
+                error: {
+                    message: "More than one file is uploaded",
+                    code: 'FILE_LIMIT_EXCEEDED'
+                }
+            });
+        }
+
+
         const validationError = validateFiles(req.files);
         if (validationError) {
             cleanUp(req.files);
